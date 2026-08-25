@@ -1,0 +1,514 @@
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["relationJoins"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum PurchaseRequestStatus {
+ NOVA
+ AGUARDANDO_COTACAO
+ EM_COTACAO
+ AGUARDANDO_APROVACAO
+ APROVADA
+ REPROVADA
+ PEDIDO_REALIZADO
+ AGUARDANDO_ENTREGA
+ RECEBIDA_PARCIALMENTE
+ RECEBIDA
+ FINALIZADA
+ CANCELADA
+}
+enum Urgency {
+ BAIXA
+ MEDIA
+ ALTA
+ URGENTE
+}
+enum PurchaseOrderStatus {
+ EMITIDO
+ ENVIADO_FORNECEDOR
+ CONFIRMADO
+ AGUARDANDO_ENTREGA
+ RECEBIDO_PARCIALMENTE
+ RECEBIDO
+ CANCELADO
+}
+enum InstallmentStatus {
+ PREVISTA
+ CONFIRMADA
+ A_VENCER
+ VENCIDA
+ PAGA
+ CANCELADA
+}
+enum ApprovalStatus {
+ PENDENTE
+ APROVADA
+ REPROVADA
+}
+
+enum StockMovementType {
+ INVENTARIO_INICIAL
+ ENTRADA
+ CONSUMO
+ AJUSTE_ENTRADA
+ AJUSTE_SAIDA
+}
+
+
+model User {
+
+  id String @id @default(uuid()) @db.Uuid
+  unitId String? @map("unit_id") @db.Uuid
+  name String
+  email String @unique
+  passwordHash String @map("password_hash")
+  active Boolean @default(true)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  unit Unit? @relation(fields: [unitId], references: [id])
+  roles UserRole[]
+  requests PurchaseRequest[] @relation("requester")
+  approvals Approval[]
+  auditLogs AuditLog[]
+  sessions Session[]
+  receipts Receipt[]
+  stockMovements StockMovement[]
+  @@map("users")
+}
+model Role {
+ id String @id @default(uuid()) @db.Uuid
+name String @unique
+permissions RolePermission[]
+users UserRole[]
+approvalRules ApprovalRule[]
+@@map("roles")
+}
+model Permission {
+ id String @id @default(uuid()) @db.Uuid
+key String @unique
+description String?
+roles RolePermission[]
+@@map("permissions")
+}
+model UserRole {
+ userId String @map("user_id") @db.Uuid
+roleId String @map("role_id") @db.Uuid
+user User @relation(fields:[userId],references:[id],onDelete: Cascade)
+role Role @relation(fields:[roleId],references:[id],onDelete: Cascade)
+@@id([userId,roleId])
+@@map("user_roles")
+}
+model RolePermission {
+ roleId String @map("role_id") @db.Uuid
+permissionId String @map("permission_id") @db.Uuid
+role Role @relation(fields:[roleId],references:[id],onDelete: Cascade)
+permission Permission @relation(fields:[permissionId],references:[id],onDelete: Cascade)
+@@id([roleId,permissionId])
+@@map("role_permissions")
+}
+model Unit {
+ id String @id @default(uuid()) @db.Uuid
+code String @unique
+name String
+active Boolean @default(true)
+users User[]
+departments Department[]
+suppliers SupplierUnit[]
+requests PurchaseRequest[]
+orders PurchaseOrder[]
+installments FinancialInstallment[]
+  receipts Receipt[]
+  attachments Attachment[]
+  approvalRules ApprovalRule[]
+  inventoryItems InventoryItem[]
+@@map("units")
+}
+model Department {
+ id String @id @default(uuid()) @db.Uuid
+unitId String @map("unit_id") @db.Uuid
+name String
+unit Unit @relation(fields:[unitId],references:[id])
+requests PurchaseRequest[]
+@@unique([unitId,name])
+@@map("departments")
+}
+model Category {
+ id String @id @default(uuid()) @db.Uuid
+name String @unique
+active Boolean @default(true)
+requests PurchaseRequest[]
+suppliers SupplierCategory[]
+inventoryItems InventoryItem[]
+@@map("categories")
+}
+model Supplier {
+ id String @id @default(uuid()) @db.Uuid
+legalName String @map("legal_name")
+tradeName String? @map("trade_name")
+document String @unique
+stateRegistration String? @map("state_registration")
+phone String?
+whatsapp String?
+email String?
+address String?
+city String?
+state String?
+salesperson String?
+defaultPaymentTermId String? @map("default_payment_term_id") @db.Uuid
+defaultPaymentTerm PaymentTerm? @relation(fields:[defaultPaymentTermId],references:[id])
+notes String?
+active Boolean @default(true)
+categories SupplierCategory[]
+units SupplierUnit[]
+quotations Quotation[]
+orders PurchaseOrder[]
+installments FinancialInstallment[]
+@@map("suppliers")
+inventoryItems InventoryItem[]
+}
+model SupplierCategory {
+ supplierId String @map("supplier_id") @db.Uuid
+categoryId String @map("category_id") @db.Uuid
+supplier Supplier @relation(fields:[supplierId],references:[id],onDelete: Cascade)
+category Category @relation(fields:[categoryId],references:[id],onDelete: Cascade)
+@@id([supplierId,categoryId])
+@@map("supplier_categories")
+}
+model SupplierUnit {
+ supplierId String @map("supplier_id") @db.Uuid
+unitId String @map("unit_id") @db.Uuid
+supplier Supplier @relation(fields:[supplierId],references:[id],onDelete: Cascade)
+unit Unit @relation(fields:[unitId],references:[id],onDelete: Cascade)
+@@id([supplierId,unitId])
+@@map("supplier_units")
+}
+model PaymentTerm {
+ id String @id @default(uuid()) @db.Uuid
+name String @unique
+rank Int
+days Int[]
+postReceipt Boolean @default(false) @map("post_receipt")
+active Boolean @default(true)
+quotations Quotation[]
+orders PurchaseOrder[]
+installments FinancialInstallment[]
+suppliers Supplier[]
+@@map("payment_terms")
+}
+model PurchaseRequest {
+ id String @id @default(uuid()) @db.Uuid
+code String @unique
+year Int
+unitId String @map("unit_id") @db.Uuid
+departmentId String? @map("department_id") @db.Uuid
+requesterId String @map("requester_id") @db.Uuid
+categoryId String? @map("category_id") @db.Uuid
+requestedAt DateTime @default(now()) @map("requested_at")
+neededBy DateTime? @map("needed_by")
+urgency Urgency @default(MEDIA)
+description String
+justification String?
+notes String?
+status PurchaseRequestStatus @default(NOVA)
+unit Unit @relation(fields:[unitId],references:[id])
+department Department? @relation(fields:[departmentId],references:[id])
+requester User @relation("requester",fields:[requesterId],references:[id])
+category Category? @relation(fields:[categoryId],references:[id])
+items PurchaseRequestItem[]
+quotations Quotation[]
+approvals Approval[]
+orders PurchaseOrder[]
+attachments Attachment[]
+@@index([unitId,status])
+@@map("purchase_requests")
+}
+model PurchaseRequestItem {
+ id String @id @default(uuid()) @db.Uuid
+requestId String @map("request_id") @db.Uuid
+product String
+detail String?
+quantity Decimal @db.Decimal(15,3)
+unitOfMeasure String @map("unit_of_measure")
+inventoryItemId String? @map("inventory_item_id") @db.Uuid
+request PurchaseRequest @relation(fields:[requestId],references:[id],onDelete: Cascade)
+inventoryItem InventoryItem? @relation(fields:[inventoryItemId],references:[id])
+quotationItems QuotationItem[]
+orderItems PurchaseOrderItem[]
+@@map("purchase_request_items")
+}
+model Quotation {
+ id String @id @default(uuid()) @db.Uuid
+requestId String @map("request_id") @db.Uuid
+supplierId String @map("supplier_id") @db.Uuid
+quotedAt DateTime @default(now()) @map("quoted_at")
+discount Decimal @default(0) @db.Decimal(15,2)
+freight Decimal @default(0) @db.Decimal(15,2)
+fees Decimal @default(0) @db.Decimal(15,2)
+taxes Decimal @default(0) @db.Decimal(15,2)
+total Decimal @db.Decimal(15,2)
+paymentTermId String @map("payment_term_id") @db.Uuid
+installments Int @default(1)
+installmentIntervalDays Int @default(0) @map("installment_interval_days")
+firstDueDate DateTime? @map("first_due_date")
+paymentDays Int @default(0) @map("payment_days")
+paidAfterReceipt Boolean @default(false) @map("paid_after_receipt")
+deliveryDays Int? @map("delivery_days")
+validUntil DateTime? @map("valid_until")
+salesperson String?
+notes String?
+request PurchaseRequest @relation(fields:[requestId],references:[id],onDelete: Cascade)
+supplier Supplier @relation(fields:[supplierId],references:[id])
+paymentTerm PaymentTerm @relation(fields:[paymentTermId],references:[id])
+items QuotationItem[]
+attachments Attachment[]
+approvals Approval[]
+@@index([requestId])
+@@map("quotations")
+}
+model QuotationItem {
+ id String @id @default(uuid()) @db.Uuid
+quotationId String @map("quotation_id") @db.Uuid
+requestItemId String @map("request_item_id") @db.Uuid
+quantity Decimal @db.Decimal(15,3)
+unitPrice Decimal @map("unit_price") @db.Decimal(15,2)
+subtotal Decimal @db.Decimal(15,2)
+quotation Quotation @relation(fields:[quotationId],references:[id],onDelete: Cascade)
+requestItem PurchaseRequestItem @relation(fields:[requestItemId],references:[id])
+@@map("quotation_items")
+}
+model Approval {
+ id String @id @default(uuid()) @db.Uuid
+requestId String @map("request_id") @db.Uuid
+quotationId String? @map("quotation_id") @db.Uuid
+approverId String @map("approver_id") @db.Uuid
+status ApprovalStatus @default(PENDENTE)
+selectedSupplierId String? @map("selected_supplier_id") @db.Uuid
+selectedTotal Decimal? @map("selected_total") @db.Decimal(15,2)
+justification String?
+systemRecommendedQuotationId String? @map("system_recommended_quotation_id") @db.Uuid
+decidedAt DateTime? @map("decided_at")
+createdAt DateTime @default(now()) @map("created_at")
+ruleId String? @map("rule_id") @db.Uuid
+request PurchaseRequest @relation(fields:[requestId],references:[id])
+quotation Quotation? @relation(fields:[quotationId],references:[id])
+approver User @relation(fields:[approverId],references:[id])
+rule ApprovalRule? @relation(fields:[ruleId],references:[id])
+@@index([status, approverId])
+@@map("approvals")
+}
+model PurchaseOrder {
+ id String @id @default(uuid()) @db.Uuid
+code String @unique
+year Int
+issuedAt DateTime @default(now()) @map("issued_at")
+requestId String @map("request_id") @db.Uuid
+supplierId String @map("supplier_id") @db.Uuid
+unitId String @map("unit_id") @db.Uuid
+paymentTermId String @map("payment_term_id") @db.Uuid
+total Decimal @db.Decimal(15,2)
+deliveryDays Int? @map("delivery_days")
+expectedDelivery DateTime? @map("expected_delivery")
+status PurchaseOrderStatus @default(EMITIDO)
+responsibleId String? @map("responsible_id") @db.Uuid
+notes String?
+request PurchaseRequest @relation(fields:[requestId],references:[id])
+supplier Supplier @relation(fields:[supplierId],references:[id])
+unit Unit @relation(fields:[unitId],references:[id])
+paymentTerm PaymentTerm @relation(fields:[paymentTermId],references:[id])
+items PurchaseOrderItem[]
+receipts Receipt[]
+installments FinancialInstallment[]
+attachments Attachment[]
+@@index([unitId,status])
+@@map("purchase_orders")
+}
+model PurchaseOrderItem {
+ id String @id @default(uuid()) @db.Uuid
+orderId String @map("order_id") @db.Uuid
+requestItemId String? @map("request_item_id") @db.Uuid
+product String
+quantity Decimal @db.Decimal(15,3)
+unitPrice Decimal @map("unit_price") @db.Decimal(15,2)
+subtotal Decimal @db.Decimal(15,2)
+order PurchaseOrder @relation(fields:[orderId],references:[id],onDelete: Cascade)
+requestItem PurchaseRequestItem? @relation(fields:[requestItemId],references:[id])
+receiptItems ReceiptItem[]
+@@map("purchase_order_items")
+}
+model Receipt {
+ id String @id @default(uuid()) @db.Uuid
+orderId String @map("order_id") @db.Uuid
+unitId String @map("unit_id") @db.Uuid
+receivedAt DateTime @default(now()) @map("received_at")
+responsibleId String @map("responsible_id") @db.Uuid
+notes String?
+discrepancies String?
+damaged Boolean @default(false)
+order PurchaseOrder @relation(fields:[orderId],references:[id])
+unit Unit @relation(fields:[unitId],references:[id])
+responsible User @relation(fields:[responsibleId],references:[id])
+items ReceiptItem[]
+attachments Attachment[]
+@@map("receipts")
+}
+model ReceiptItem {
+ id String @id @default(uuid()) @db.Uuid
+receiptId String @map("receipt_id") @db.Uuid
+orderItemId String @map("order_item_id") @db.Uuid
+quantity Decimal @db.Decimal(15,3)
+receipt Receipt @relation(fields:[receiptId],references:[id],onDelete: Cascade)
+orderItem PurchaseOrderItem @relation(fields:[orderItemId],references:[id])
+@@map("receipt_items")
+}
+model FinancialInstallment {
+ id String @id @default(uuid()) @db.Uuid
+orderId String @map("order_id") @db.Uuid
+supplierId String @map("supplier_id") @db.Uuid
+unitId String @map("unit_id") @db.Uuid
+paymentTermId String @map("payment_term_id") @db.Uuid
+installmentNumber Int @map("installment_number")
+amount Decimal @db.Decimal(15,2)
+dueDate DateTime @map("due_date")
+status InstallmentStatus @default(PREVISTA)
+paidAt DateTime? @map("paid_at")
+notes String?
+order PurchaseOrder @relation(fields:[orderId],references:[id])
+supplier Supplier @relation(fields:[supplierId],references:[id])
+unit Unit @relation(fields:[unitId],references:[id])
+paymentTerm PaymentTerm @relation(fields:[paymentTermId],references:[id])
+@@unique([orderId,installmentNumber])
+@@index([unitId,dueDate,status])
+@@map("financial_installments")
+}
+model Attachment {
+ id String @id @default(uuid()) @db.Uuid
+unitId String @map("unit_id") @db.Uuid
+fileName String @map("file_name")
+mimeType String @map("mime_type")
+storageKey String @map("storage_key")
+sizeBytes BigInt @map("size_bytes")
+requestId String? @map("request_id") @db.Uuid
+quotationId String? @map("quotation_id") @db.Uuid
+orderId String? @map("order_id") @db.Uuid
+receiptId String? @map("receipt_id") @db.Uuid
+unit Unit @relation(fields:[unitId],references:[id])
+request PurchaseRequest? @relation(fields:[requestId],references:[id])
+quotation Quotation? @relation(fields:[quotationId],references:[id])
+order PurchaseOrder? @relation(fields:[orderId],references:[id])
+receipt Receipt? @relation(fields:[receiptId],references:[id])
+@@map("attachments")
+}
+model AuditLog {
+ id String @id @default(uuid()) @db.Uuid
+unitId String? @map("unit_id") @db.Uuid
+userId String @map("user_id") @db.Uuid
+entity String
+recordId String @map("record_id")
+field String?
+oldValue Json? @map("old_value")
+newValue Json? @map("new_value")
+createdAt DateTime @default(now()) @map("created_at")
+user User @relation(fields:[userId],references:[id])
+@@index([entity,recordId])
+@@map("audit_logs")
+}
+model Setting {
+ id String @id @default(uuid()) @db.Uuid
+unitId String? @map("unit_id") @db.Uuid
+key String
+value Json
+description String?
+updatedAt DateTime @updatedAt @map("updated_at")
+@@unique([unitId,key])
+@@map("settings")
+}
+
+model Session {
+  id String @id @default(uuid()) @db.Uuid
+  userId String @map("user_id") @db.Uuid
+  tokenHash String @unique @map("token_hash")
+  expiresAt DateTime @map("expires_at")
+  createdAt DateTime @default(now()) @map("created_at")
+  user User @relation(fields:[userId], references:[id], onDelete: Cascade)
+  @@index([userId, expiresAt])
+  @@map("sessions")
+}
+
+model ApprovalRule {
+  id String @id @default(uuid()) @db.Uuid
+  unitId String? @map("unit_id") @db.Uuid
+  roleId String @map("role_id") @db.Uuid
+  name String
+  minAmount Decimal @default(0) @map("min_amount") @db.Decimal(15,2)
+  maxAmount Decimal? @map("max_amount") @db.Decimal(15,2)
+  requireOnDivergence Boolean @default(false) @map("require_on_divergence")
+  priority Int @default(100)
+  active Boolean @default(true)
+  unit Unit? @relation(fields:[unitId], references:[id])
+  role Role @relation(fields:[roleId], references:[id])
+  approvals Approval[]
+  @@index([unitId, active, priority])
+  @@map("approval_rules")
+}
+
+
+enum InventoryCriticality {
+  NORMAL
+  IMPORTANTE
+  CRITICO
+}
+
+enum ReplenishmentMethod {
+  CONSUMO_MEDIO
+  ESTOQUE_MINIMO
+}
+
+model InventoryItem {
+  id String @id @default(uuid()) @db.Uuid
+  unitId String @map("unit_id") @db.Uuid
+  categoryId String? @map("category_id") @db.Uuid
+  name String
+  description String?
+  unitOfMeasure String @map("unit_of_measure")
+  currentStock Decimal @default(0) @map("current_stock") @db.Decimal(15,3)
+  minimumStock Decimal @default(0) @map("minimum_stock") @db.Decimal(15,3)
+  targetStock Decimal? @map("target_stock") @db.Decimal(15,3)
+  estimatedDailyConsumption Decimal? @map("estimated_daily_consumption") @db.Decimal(15,3)
+  leadTimeDays Int @default(7) @map("lead_time_days")
+  safetyDays Int @default(3) @map("safety_days")
+  criticality InventoryCriticality @default(NORMAL)
+  replenishmentMethod ReplenishmentMethod @default(CONSUMO_MEDIO) @map("replenishment_method")
+  preferredSupplierId String? @map("preferred_supplier_id") @db.Uuid
+  notes String?
+  active Boolean @default(true)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  unit Unit @relation(fields:[unitId], references:[id])
+  category Category? @relation(fields:[categoryId], references:[id])
+  preferredSupplier Supplier? @relation(fields:[preferredSupplierId], references:[id])
+  movements StockMovement[]
+  requestItems PurchaseRequestItem[]
+  @@unique([unitId, name])
+  @@index([unitId, active])
+  @@map("inventory_items")
+}
+
+model StockMovement {
+  id String @id @default(uuid()) @db.Uuid
+  inventoryItemId String @map("inventory_item_id") @db.Uuid
+  userId String @map("user_id") @db.Uuid
+  type StockMovementType
+  quantity Decimal @db.Decimal(15,3)
+  balanceAfter Decimal @map("balance_after") @db.Decimal(15,3)
+  reason String?
+  occurredAt DateTime @default(now()) @map("occurred_at")
+  inventoryItem InventoryItem @relation(fields:[inventoryItemId], references:[id], onDelete: Cascade)
+  user User @relation(fields:[userId], references:[id])
+  @@index([inventoryItemId, occurredAt])
+  @@map("stock_movements")
+}
