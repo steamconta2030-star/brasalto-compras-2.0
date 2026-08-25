@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { prisma } from '../../../../../lib/prisma';
+import { lockTransaction, nextDocumentCode } from '../../../../../lib/transaction-lock';
 
 const itemSchema = z.object({
   product: z.string().trim().min(1),
@@ -19,17 +20,6 @@ const payloadSchema = z.object({
   urgency: z.enum(['BAIXA', 'MEDIA', 'ALTA', 'URGENTE']).optional().default('MEDIA'),
   items: z.array(itemSchema).min(1).optional(),
 });
-
-async function nextRequestCode() {
-  const year = new Date().getFullYear();
-  const last = await prisma.purchaseRequest.findFirst({
-    where: { year },
-    orderBy: { code: 'desc' },
-    select: { code: true },
-  });
-  const lastNumber = last ? Number(last.code.split('-').at(-1)) || 0 : 0;
-  return `SC-${year}-${String(lastNumber + 1).padStart(4, '0')}`;
-}
 
 function unauthorized() {
   return NextResponse.json({ error: 'Não autorizado.' }, { status: 401 });
@@ -97,12 +87,22 @@ export async function POST(request: NextRequest) {
       },
     ];
 
-    const code = await nextRequestCode();
-    const created = await prisma.purchaseRequest.create({
-      data: {
+    const year = new Date().getFullYear();
+    const result = await prisma.$transaction(async tx => {
+      await lockTransaction(tx, `email-message-${payload.messageId}`);
+      const duplicateInTransaction = await tx.purchaseRequest.findUnique({
+        where: { emailMessageId: payload.messageId },
+        select: { id: true, code: true, status: true },
+      });
+      if (duplicateInTransaction) return { duplicate: true as const, request: duplicateInTransaction };
+
+      await lockTransaction(tx, `purchase-request-code-${year}`);
+      const last = await tx.purchaseRequest.findFirst({ where: { year }, orderBy: { code: 'desc' }, select: { code: true } });
+      const code = nextDocumentCode('SC', year, last?.code);
+      const created = await tx.purchaseRequest.create({ data: {
         code,
         emailMessageId: payload.messageId,
-        year: new Date().getFullYear(),
+        year,
         unitId: unit.id,
         departmentId: department?.id ?? null,
         requesterId: requester.id,
@@ -131,10 +131,11 @@ export async function POST(request: NextRequest) {
         status: true,
         unitId: true,
         requesterId: true,
-      },
+      }});
+      return { duplicate: false as const, request: created };
     });
 
-    return NextResponse.json({ ok: true, duplicate: false, request: created }, { status: 201 });
+    return NextResponse.json({ ok: true, ...result }, { status: result.duplicate ? 200 : 201 });
   } catch (error) {
     if (error instanceof z.ZodError) {
       return NextResponse.json({ error: 'Payload inválido.', details: error.flatten() }, { status: 400 });

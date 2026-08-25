@@ -6,18 +6,12 @@ import { z } from 'zod';
 import { prisma } from '../lib/prisma';
 import { resolveInstallmentDays, splitInstallments } from '../domain/quotation/recommendation';
 import { audit, requirePermission } from '../lib/auth';
+import { lockTransaction, nextDocumentCode } from '../lib/transaction-lock';
 
 function addDays(date: Date, days: number) {
   const result = new Date(date);
   result.setDate(result.getDate() + days);
   return result;
-}
-
-async function nextOrderCode() {
-  const year = new Date().getFullYear();
-  const last = await prisma.purchaseOrder.findFirst({ where: { year }, orderBy: { code: 'desc' }, select: { code: true } });
-  const lastNumber = last ? Number(last.code.split('-').at(-1)) || 0 : 0;
-  return `PC-${year}-${String(lastNumber + 1).padStart(4, '0')}`;
 }
 
 export async function issueApprovedPurchaseOrder(requestId: string, actorId: string, notes?: string) {
@@ -41,7 +35,6 @@ export async function issueApprovedPurchaseOrder(requestId: string, actorId: str
   const quotation = approval?.quotation;
   if (!quotation) throw new Error('A solicitação precisa ter uma cotação aprovada antes da emissão do pedido.');
 
-  const code = await nextOrderCode();
   const now = new Date();
   const expectedDelivery = quotation.deliveryDays == null ? null : addDays(now, quotation.deliveryDays);
   const days = resolveInstallmentDays(quotation.paymentTerm.days, quotation.paymentDays);
@@ -49,8 +42,12 @@ export async function issueApprovedPurchaseOrder(requestId: string, actorId: str
   const baseDate = quotation.paymentTerm.postReceipt ? (expectedDelivery ?? now) : now;
 
   const createdOrder = await prisma.$transaction(async tx => {
+    await lockTransaction(tx, `purchase-order-request-${requestId}`);
     const existingInTransaction = await tx.purchaseOrder.findUnique({ where: { requestId } });
     if (existingInTransaction) return existingInTransaction;
+    await lockTransaction(tx, `purchase-order-code-${now.getFullYear()}`);
+    const lastOrder = await tx.purchaseOrder.findFirst({ where: { year: now.getFullYear() }, orderBy: { code: 'desc' }, select: { code: true } });
+    const code = nextDocumentCode('PC', now.getFullYear(), lastOrder?.code);
     const order = await tx.purchaseOrder.create({
       data: {
         code, year: now.getFullYear(), requestId: request.id, supplierId: quotation.supplierId,
@@ -128,12 +125,17 @@ export async function registerReceipt(formData: FormData) {
   });
   const target = order.items.find(i => i.id === parsed.orderItemId);
   if (!target) throw new Error('O item selecionado não pertence ao pedido.');
-  const alreadyReceived = target.receiptItems.reduce((sum, item) => sum + Number(item.quantity), 0);
-  const pending = Number(target.quantity) - alreadyReceived;
-  if (parsed.quantity > pending + 0.0001) throw new Error(`Quantidade informada excede o saldo pendente de ${pending}.`);
   const receivedAt = parsed.receivedAt ? new Date(`${parsed.receivedAt}T12:00:00`) : new Date();
 
   const receipt = await prisma.$transaction(async tx => {
+    await lockTransaction(tx, `receipt-order-item-${parsed.orderItemId}`);
+    const lockedTarget = await tx.purchaseOrderItem.findUniqueOrThrow({
+      where: { id: parsed.orderItemId },
+      include: { receiptItems: true, requestItem: true },
+    });
+    const alreadyReceived = lockedTarget.receiptItems.reduce((sum, item) => sum + Number(item.quantity), 0);
+    const pending = Number(lockedTarget.quantity) - alreadyReceived;
+    if (parsed.quantity > pending + 0.0001) throw new Error(`Quantidade informada excede o saldo pendente de ${pending}.`);
     const createdReceipt = await tx.receipt.create({
       data: {
         orderId: order.id,
@@ -143,15 +145,16 @@ export async function registerReceipt(formData: FormData) {
         notes: parsed.notes || null,
         discrepancies: parsed.discrepancies || null,
         damaged: parsed.damaged === 'on',
-        items: { create: { orderItemId: target.id, quantity: parsed.quantity } },
+        items: { create: { orderItemId: lockedTarget.id, quantity: parsed.quantity } },
       },
     });
 
     // Onda 10: pedidos originados pelo estoque voltam automaticamente ao inventário
     // quando o recebimento é registrado. Compras manuais permanecem sem vínculo.
-    if (target.requestItem?.inventoryItemId && parsed.damaged !== 'on') {
+    if (lockedTarget.requestItem?.inventoryItemId && parsed.damaged !== 'on') {
+      await lockTransaction(tx, `inventory-item-${lockedTarget.requestItem.inventoryItemId}`);
       const inventoryItem = await tx.inventoryItem.findUnique({
-        where: { id: target.requestItem.inventoryItemId },
+        where: { id: lockedTarget.requestItem.inventoryItemId },
       });
       if (inventoryItem && inventoryItem.unitId === order.unitId) {
         const previousStock = Number(inventoryItem.currentStock);

@@ -6,16 +6,10 @@ import { z } from 'zod';
 import { prisma } from '../lib/prisma';
 import { recommendQuotation } from '../domain/quotation/recommendation';
 import { audit, requirePermission } from '../lib/auth';
+import { lockTransaction, nextDocumentCode } from '../lib/transaction-lock';
 
 const nonEmpty = z.string().trim().min(1);
 const optionalUuid = z.string().uuid().optional().or(z.literal(''));
-
-async function nextRequestCode() {
-  const year = new Date().getFullYear();
-  const last = await prisma.purchaseRequest.findFirst({ where: { year }, orderBy: { code: 'desc' }, select: { code: true } });
-  const lastNumber = last ? Number(last.code.split('-').at(-1)) || 0 : 0;
-  return `SC-${year}-${String(lastNumber + 1).padStart(4, '0')}`;
-}
 
 export async function createPurchaseRequest(formData: FormData) {
   const actor = await requirePermission('REQUEST_CREATE');
@@ -34,11 +28,14 @@ export async function createPurchaseRequest(formData: FormData) {
   }).parse(Object.fromEntries(formData));
   if (actor.unitId && parsed.unitId !== actor.unitId && !actor.permissions.has('ADMIN_ALL')) throw new Error('Seu perfil não pode abrir solicitação para outra unidade.');
 
-  const code = await nextRequestCode();
-  const created = await prisma.purchaseRequest.create({
-    data: {
+  const year = new Date().getFullYear();
+  const created = await prisma.$transaction(async tx => {
+    await lockTransaction(tx, `purchase-request-code-${year}`);
+    const last = await tx.purchaseRequest.findFirst({ where: { year }, orderBy: { code: 'desc' }, select: { code: true } });
+    const code = nextDocumentCode('SC', year, last?.code);
+    return tx.purchaseRequest.create({ data: {
       code,
-      year: new Date().getFullYear(),
+      year,
       unitId: parsed.unitId,
       departmentId: parsed.departmentId || null,
       requesterId: actor.id,
@@ -48,7 +45,7 @@ export async function createPurchaseRequest(formData: FormData) {
       justification: parsed.justification || null,
       status: 'AGUARDANDO_COTACAO',
       items: { create: { product: parsed.product, detail: parsed.detail || null, quantity: parsed.quantity, unitOfMeasure: parsed.unitOfMeasure } },
-    },
+    }});
   });
   await audit(actor.id, 'PurchaseRequest', created.id, { action: 'CREATE', code: created.code, status: created.status }, undefined, created.unitId);
   revalidatePath('/');

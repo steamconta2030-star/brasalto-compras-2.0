@@ -6,6 +6,7 @@ import { z } from 'zod';
 import { prisma } from '../lib/prisma';
 import { audit, requirePermission } from '../lib/auth';
 import { calculateInventoryPlan } from '../domain/inventory/planning';
+import { lockTransaction, nextDocumentCode } from '../lib/transaction-lock';
 
 const optionalUuid = z.string().uuid().optional().or(z.literal(''));
 const nonEmpty = z.string().trim().min(1);
@@ -108,6 +109,7 @@ export async function registerStockMovement(formData: FormData) {
   }).parse(Object.fromEntries(formData));
 
   const result = await prisma.$transaction(async tx => {
+    await lockTransaction(tx, `inventory-item-${parsed.inventoryItemId}`);
     const item = await tx.inventoryItem.findUniqueOrThrow({ where: { id: parsed.inventoryItemId } });
     if (actor.unitId && actor.unitId !== item.unitId && !actor.permissions.has('ADMIN_ALL')) {
       throw new Error('Seu perfil não pode movimentar estoque de outra unidade.');
@@ -147,8 +149,7 @@ export async function createReplenishmentRequest(formData: FormData) {
   const since = new Date();
   since.setDate(since.getDate() - 30);
 
-  const [item, lastRequest] = await Promise.all([
-    prisma.inventoryItem.findUniqueOrThrow({
+  const item = await prisma.inventoryItem.findUniqueOrThrow({
       where: { id: itemId },
       include: {
         movements: {
@@ -156,13 +157,7 @@ export async function createReplenishmentRequest(formData: FormData) {
           orderBy: { occurredAt: 'asc' },
         },
       },
-    }),
-    prisma.purchaseRequest.findFirst({
-      where: { year },
-      orderBy: { code: 'desc' },
-      select: { code: true },
-    }),
-  ]);
+    });
 
   if (actor.unitId && actor.unitId !== item.unitId && !actor.permissions.has('ADMIN_ALL')) {
     throw new Error('Seu perfil não pode abrir solicitação para outra unidade.');
@@ -181,10 +176,10 @@ export async function createReplenishmentRequest(formData: FormData) {
   const quantity = plan.suggestedQuantity;
   if (quantity <= 0) throw new Error('Este item não possui quantidade de reposição pendente.');
 
-  const lastNumber = lastRequest ? Number(lastRequest.code.split('-').at(-1)) || 0 : 0;
-  const code = `SC-${year}-${String(lastNumber + 1).padStart(4, '0')}`;
-
   const request = await prisma.$transaction(async tx => {
+    await lockTransaction(tx, `purchase-request-code-${year}`);
+    const lastRequest = await tx.purchaseRequest.findFirst({ where: { year }, orderBy: { code: 'desc' }, select: { code: true } });
+    const code = nextDocumentCode('SC', year, lastRequest?.code);
     const created = await tx.purchaseRequest.create({
       data: {
         code,
