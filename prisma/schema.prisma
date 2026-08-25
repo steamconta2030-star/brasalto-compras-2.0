@@ -204,6 +204,7 @@ suppliers Supplier[]
 model PurchaseRequest {
  id String @id @default(uuid()) @db.Uuid
 code String @unique
+emailMessageId String? @unique @map("email_message_id")
 year Int
 unitId String @map("unit_id") @db.Uuid
 departmentId String? @map("department_id") @db.Uuid
@@ -307,7 +308,7 @@ model PurchaseOrder {
 code String @unique
 year Int
 issuedAt DateTime @default(now()) @map("issued_at")
-requestId String @map("request_id") @db.Uuid
+requestId String @unique @map("request_id") @db.Uuid
 supplierId String @map("supplier_id") @db.Uuid
 unitId String @map("unit_id") @db.Uuid
 paymentTermId String @map("payment_term_id") @db.Uuid

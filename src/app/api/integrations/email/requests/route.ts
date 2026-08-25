@@ -44,8 +44,8 @@ export async function POST(request: NextRequest) {
     const payload = payloadSchema.parse(await request.json());
     const marker = `[email-message-id:${payload.messageId}]`;
 
-    const duplicate = await prisma.purchaseRequest.findFirst({
-      where: { notes: { contains: marker } },
+    const duplicate = await prisma.purchaseRequest.findUnique({
+      where: { emailMessageId: payload.messageId },
       select: { id: true, code: true, status: true },
     });
     if (duplicate) {
@@ -101,6 +101,7 @@ export async function POST(request: NextRequest) {
     const created = await prisma.purchaseRequest.create({
       data: {
         code,
+        emailMessageId: payload.messageId,
         year: new Date().getFullYear(),
         unitId: unit.id,
         departmentId: department?.id ?? null,

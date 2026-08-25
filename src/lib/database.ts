@@ -56,10 +56,11 @@ export async function getReferenceData() {
   return { units, departments, categories, users, suppliers, paymentTerms, requests };
 }
 
-export async function getRequests() {
+export async function getRequests(unitId?: string | null) {
   if (!(await databaseAvailable())) return null;
   const rows = await timed('db:getRequests', () => prisma.purchaseRequest.findMany({
     relationLoadStrategy: 'join',
+    where: unitId ? { unitId } : undefined,
     select: {
       id: true, code: true, requestedAt: true, urgency: true, status: true, description: true,
       unit: { select: { name: true } },
@@ -82,11 +83,11 @@ export async function getRequests() {
 }
 
 
-export async function getRequestDetail(id: string) {
+export async function getRequestDetail(id: string, unitId?: string | null) {
   if (!(await databaseAvailable())) return null;
   const request = await prisma.purchaseRequest.findUnique({
     relationLoadStrategy: 'join',
-    where: { id },
+    where: { id, ...(unitId ? { unitId } : {}) },
     include: {
       unit: true,
       department: true,

@@ -3,10 +3,21 @@ import { Badge, Card, Money, PageHeader } from '../components/ui';
 import { requests as demoRequests, orders as demoOrders } from '../lib/demo-data';
 import { getInstallments, getInventoryOverview, getManagementIndicators, getOrders, getRequests } from '../lib/database';
 import { statusLabel } from '../lib/format';
+import { requireUser } from '../lib/auth';
 
 export default async function Dashboard(){
+  const actor = await requireUser();
+  const admin = actor.permissions.has('ADMIN_ALL');
+  const canManagePurchases = admin || actor.permissions.has('QUOTATION_MANAGE') || actor.permissions.has('PURCHASE_ORDER_CREATE');
+  const canSeeFinance = admin || actor.permissions.has('FINANCE_VIEW');
+  const canSeeInventory = admin || actor.permissions.has('INVENTORY_MANAGE');
+  const unitScope = admin ? null : actor.unitId;
   const [dbRows,dbOrders,metrics,inventory,installments]=await Promise.all([
-    getRequests(),getOrders(),getManagementIndicators(),getInventoryOverview(),getInstallments()
+    getRequests(unitScope),
+    canManagePurchases ? getOrders() : Promise.resolve([]),
+    canManagePurchases ? getManagementIndicators() : Promise.resolve(null),
+    canSeeInventory ? getInventoryOverview() : Promise.resolve(null),
+    canSeeFinance ? getInstallments() : Promise.resolve([]),
   ]);
   const rows=(dbRows ?? demoRequests).slice(0,5);
   const orders=dbOrders ?? demoOrders;

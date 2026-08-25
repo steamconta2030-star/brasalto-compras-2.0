@@ -144,8 +144,8 @@ export async function createQuotation(formData: FormData) {
     redirect(`/solicitacoes/${parsed.requestId}?quotation=duplicate-blocked`);
   }
 
-  const firstItem = request.items[0];
-  if (!firstItem) throw new Error('A solicitação precisa ter ao menos um item.');
+  if (!request.items.length) throw new Error('A solicitação precisa ter ao menos um item.');
+  const itemTotal = parsed.total / request.items.length;
 
   const [quotation] = await prisma.$transaction([
     prisma.quotation.create({
@@ -160,7 +160,14 @@ export async function createQuotation(formData: FormData) {
         paymentDays: parsed.paymentDays || Math.max(...term.days, 0),
         paidAfterReceipt: term.postReceipt,
         notes: parsed.notes || null,
-        items: { create: { requestItemId: firstItem.id, quantity: firstItem.quantity, unitPrice: parsed.total / Number(firstItem.quantity), subtotal: parsed.total } },
+        items: {
+          create: request.items.map(item => ({
+            requestItemId: item.id,
+            quantity: item.quantity,
+            unitPrice: itemTotal / Number(item.quantity),
+            subtotal: itemTotal,
+          })),
+        },
       },
     }),
     prisma.purchaseRequest.update({ where: { id: parsed.requestId }, data: { status: 'EM_COTACAO' } }),

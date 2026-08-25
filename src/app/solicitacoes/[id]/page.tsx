@@ -8,10 +8,11 @@ import { deleteQuotation } from '../../../actions/purchases';
 import { SubmitButton } from '../../../components/submit-button';
 
 export default async function Page({params,searchParams}:{params:Promise<{id:string}>;searchParams:Promise<{quotation?:string}>}){
-  await requirePermission('REQUEST_CREATE');
+  const actor = await requirePermission('REQUEST_CREATE');
   const {id}=await params;
   const query=await searchParams;
-  const [request,trace]=await Promise.all([getRequestDetail(id),getPurchaseTrace(id)]);
+  const unitScope = actor.permissions.has('ADMIN_ALL') ? null : actor.unitId;
+  const [request,trace]=await Promise.all([getRequestDetail(id, unitScope),getPurchaseTrace(id)]);
   if(!request) notFound();
 
   const canQuote=['AGUARDANDO_COTACAO','EM_COTACAO'].includes(request.status);

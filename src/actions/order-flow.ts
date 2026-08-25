@@ -21,7 +21,7 @@ async function nextOrderCode() {
 }
 
 export async function issueApprovedPurchaseOrder(requestId: string, actorId: string, notes?: string) {
-  const existing = await prisma.purchaseOrder.findFirst({ where: { requestId } });
+  const existing = await prisma.purchaseOrder.findUnique({ where: { requestId } });
   if (existing) return existing;
 
   const request = await prisma.purchaseRequest.findUniqueOrThrow({
@@ -49,6 +49,8 @@ export async function issueApprovedPurchaseOrder(requestId: string, actorId: str
   const baseDate = quotation.paymentTerm.postReceipt ? (expectedDelivery ?? now) : now;
 
   const createdOrder = await prisma.$transaction(async tx => {
+    const existingInTransaction = await tx.purchaseOrder.findUnique({ where: { requestId } });
+    if (existingInTransaction) return existingInTransaction;
     const order = await tx.purchaseOrder.create({
       data: {
         code, year: now.getFullYear(), requestId: request.id, supplierId: quotation.supplierId,
