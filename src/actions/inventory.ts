@@ -151,7 +151,7 @@ export async function createReplenishmentRequest(formData: FormData) {
     prisma.inventoryItem.findUniqueOrThrow({
       where: { id: itemId },
       include: {
-        stockMovements: {
+        movements: {
           where: { occurredAt: { gte: since }, type: 'CONSUMO' },
           orderBy: { occurredAt: 'asc' },
         },
@@ -176,7 +176,7 @@ export async function createReplenishmentRequest(formData: FormData) {
     estimatedDailyConsumption: item.estimatedDailyConsumption == null ? null : Number(item.estimatedDailyConsumption),
     leadTimeDays: item.leadTimeDays,
     safetyDays: item.safetyDays,
-    consumptions: item.stockMovements.map(m=>({quantity:Number(m.quantity),occurredAt:m.occurredAt})),
+    consumptions: item.movements.map(m=>({quantity:Number(m.quantity),occurredAt:m.occurredAt})),
   });
   const quantity = plan.suggestedQuantity;
   if (quantity <= 0) throw new Error('Este item não possui quantidade de reposição pendente.');
