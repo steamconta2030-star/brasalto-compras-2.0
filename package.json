@@ -3,7 +3,8 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "prisma generate && next build",
+    "build:setup": "prisma generate && prisma db push && prisma db seed && next build",
     "start": "next start",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
